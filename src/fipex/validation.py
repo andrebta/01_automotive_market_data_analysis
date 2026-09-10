@@ -42,6 +42,14 @@ EXPECTED_FUEL_MAPPING = {
     "Gás Natural": "n",
 }
 
+EXPECTED_PROCESSED_DTYPES = {
+    "mes_referencia": "int64",
+    "ano_referencia": "int64",
+    "ano_modelo": "Int64",
+    "zero_km": "bool",
+    "valor_centavos": "int64",
+}
+
 CURRENCY_PATTERN = r"^R\$ \d{1,3}(\.\d{3})*,\d{2}$"
 
 # 1. Schema Validation
@@ -274,7 +282,74 @@ def validate_monetary_fields(df: pd.DataFrame) -> None:
             "inconsistent monetary representations."
         )
 
-# 7. Main Validation Orchestrator
+# 7. Processed Data Validation
+
+def validate_processed_dtypes(df: pd.DataFrame) -> None:
+    dtype_mismatches = {}
+
+    for column, expected_dtype in EXPECTED_PROCESSED_DTYPES.items():
+        actual_dtype = str(df[column].dtype)
+
+        if actual_dtype != expected_dtype:
+            dtype_mismatches[column] = {
+                "expected": expected_dtype,
+                "actual": actual_dtype,
+            }
+
+    if dtype_mismatches:
+        raise TypeError(
+            f"Unexpected processed dtypes: {dtype_mismatches}"
+        )
+
+
+def validate_shape_preservation(
+    df_raw: pd.DataFrame,
+    df: pd.DataFrame,
+) -> None:
+    if df_raw.shape != df.shape:
+        raise ValueError(
+            f"Shape changed during transformation: "
+            f"raw={df_raw.shape}, processed={df.shape}"
+        )
+
+
+def validate_unchanged_values(
+    df_raw: pd.DataFrame,
+    df: pd.DataFrame,
+) -> None:
+    unchanged_columns = [
+        "mes_referencia",
+        "ano_referencia",
+        "ano_modelo",
+        "zero_km",
+        "valor_centavos",
+    ]
+
+    unexpected_changes = {}
+
+    for column in unchanged_columns:
+        raw_values = df_raw[column]
+        processed_values = df[column]
+
+        both_null = raw_values.isna() & processed_values.isna()
+
+        equal_values = (
+            raw_values.eq(processed_values)
+            .fillna(False)
+            | both_null
+        )
+
+        changed_count = (~equal_values).sum()
+
+        if changed_count > 0:
+            unexpected_changes[column] = changed_count
+
+    if unexpected_changes:
+        raise ValueError(
+            f"Unexpected value changes detected: {unexpected_changes}"
+        )
+
+# 8. Main Validation Orchestrator
 
 def validate_fipe_data(df: pd.DataFrame) -> None:
     validate_schema(df)
@@ -283,3 +358,12 @@ def validate_fipe_data(df: pd.DataFrame) -> None:
     validate_domains(df)
     validate_functional_dependencies(df)
     validate_monetary_fields(df)
+
+def validate_processed_data(
+    df_raw: pd.DataFrame,
+    df: pd.DataFrame,
+) -> None:
+    validate_fipe_data(df)
+    validate_processed_dtypes(df)
+    validate_shape_preservation(df_raw, df)
+    validate_unchanged_values(df_raw, df)

@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/fipex/__init__.py
+src/fipex/config.py
+src/fipex/io.py
+src/fipex/pipeline.py
+src/fipex/transformation.py
+src/fipex/validation.py
+src/fipex.egg-info/PKG-INFO
+src/fipex.egg-info/SOURCES.txt
+src/fipex.egg-info/dependency_links.txt
+src/fipex.egg-info/top_level.txt
