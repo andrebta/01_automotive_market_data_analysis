@@ -23,3 +23,5 @@ GROUP BY
     v.nome_marca,
     v.nome_modelo
 ORDER BY preco_medio DESC;
+
+SELECT * FROM dim_vehicle WHERE zero_km = true;
