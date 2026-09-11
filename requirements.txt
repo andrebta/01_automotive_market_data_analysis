@@ -15,9 +15,10 @@ colorama==0.4.6
 comm==0.2.3
 debugpy==1.8.21
 defusedxml==0.7.1
+duckdb==1.5.5
 executing==2.2.1
 fastjsonschema==2.22.2
--e git+https://github.com/andrebta/01_automotive_market_data_analysis@71a1407f385ed6d9069335518f822ab7d90ee707#egg=fipex
+-e git+https://github.com/andrebta/01_automotive_market_data_analysis@ef2a86e2671e087b4c970b1ee9a38c37f22bfc9d#egg=fipex
 fqdn==1.5.1
 greenlet==3.5.5
 h11==0.16.0
