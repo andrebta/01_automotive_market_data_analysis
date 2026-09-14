@@ -21,7 +21,9 @@ The project covers:
 - dimensional modeling with a Star Schema;
 - Gold layer generation;
 - automated end-to-end orchestration;
-- Power BI dashboard development.
+- automated tests;
+- Power BI dashboard development;
+- technical documentation and version control.
 
 ---
 
@@ -116,11 +118,7 @@ Gold    -> DuckDB marts + data/gold
 
 ## Data Source
 
-The dataset used in this project comes from the FIPE-derived public dataset maintained by FipeX Labs.
-
-Source repository:
-
-https://github.com/fipex-labs/dataset
+The dataset used in this project comes from the FIPE-derived public dataset maintained by [FipeX Labs](https://github.com/fipex-labs/dataset).
 
 The dataset contains Brazilian automotive market reference prices and includes information such as:
 
@@ -134,9 +132,9 @@ The dataset contains Brazilian automotive market reference prices and includes i
 - fuel type;
 - price.
 
-The dataset is distributed under the CC0 1.0 Universal license, allowing unrestricted use, modification and redistribution.
+The source dataset is distributed under the CC0 1.0 Universal license.
 
-The current project stores the source data in Parquet format to preserve data types and provide efficient analytical storage.
+The project stores the source data in Parquet format to preserve data types and provide efficient analytical storage.
 
 ---
 
@@ -158,7 +156,9 @@ Profiling was used to identify:
 - monetary consistency;
 - the correct dataset grain.
 
-The validated snapshot grain is:
+### Snapshot Grain
+
+The validated natural key for one monthly FIPE snapshot is:
 
 ```text
 codigo_fipe
@@ -167,13 +167,28 @@ codigo_fipe
 + sigla_combustivel
 ```
 
-For historical observations, the reference period is also required.
+### Historical Grain
+
+When multiple monthly snapshots are combined, the reference period is also required:
+
+```text
+ano_referencia
++ mes_referencia
++ codigo_fipe
++ ano_modelo
++ zero_km
++ sigla_combustivel
+```
 
 ---
 
 ## Data Quality
 
-Data quality rules are documented in:
+The raw data dictionary is available at:
+
+[View Raw Data Dictionary](docs/data_dictionary.md)
+
+The executable data quality rules are documented at:
 
 [View Data Quality Rules](docs/data_quality_rules.md)
 
@@ -181,15 +196,18 @@ The pipeline validates, among other rules:
 
 - expected schema;
 - mandatory fields;
+- conditional nullability;
 - snapshot grain uniqueness;
 - historical grain uniqueness;
-- allowed vehicle types;
+- vehicle-type domain;
 - valid reference months;
 - fuel name/code consistency;
 - FIPE code functional dependencies;
 - positive monetary values;
 - consistency between monetary representations;
-- manufacturer name standardization.
+- Brazilian currency formatting;
+- single-snapshot reference-period consistency;
+- manufacturer name standardization after transformation.
 
 An important semantic rule identified during profiling is:
 
@@ -198,6 +216,8 @@ ano_modelo IS NULL <-> zero_km = TRUE
 ```
 
 These null values are intentionally preserved instead of being replaced by an artificial model year.
+
+The observed value `2027` is a legitimate model year in the source data and is not used to impute zero-kilometer records.
 
 ---
 
@@ -212,9 +232,26 @@ src/fipex/
 Main responsibilities:
 
 - `io.py`: dataset reading and writing;
-- `transformations.py`: string cleanup, brand standardization, datatype normalization and column ordering;
+- `transformations.py`: string cleanup, manufacturer-name standardization, datatype normalization and column ordering;
 - `validation.py`: data quality checks before and after transformation;
+- `config.py`: centralized project paths and snapshot configuration;
 - `pipeline.py`: orchestration of the complete workflow.
+
+### Snapshot Configuration
+
+The current monthly snapshot is configured in:
+
+```python
+SNAPSHOT_ID = "2026_09"
+```
+
+inside:
+
+```text
+src/fipex/config.py
+```
+
+The raw and processed filenames are derived from this value, avoiding duplicated snapshot hardcoding across the pipeline.
 
 ---
 
@@ -222,7 +259,7 @@ Main responsibilities:
 
 DuckDB is used as the local analytical engine.
 
-The SQL layer is divided into:
+The SQL layer is divided into four areas.
 
 ### Staging
 
@@ -238,7 +275,9 @@ Materializes the analytical Star Schema used by downstream consumers.
 
 ### Analysis
 
-Contains validation and exploratory analytical queries used to test the Gold layer before Power BI consumption.
+Contains analytical and validation queries used to verify the Gold layer before Power BI consumption.
+
+The Python orchestrator renders the file-path placeholders used by the SQL scripts before executing them in DuckDB.
 
 ---
 
@@ -246,13 +285,13 @@ Contains validation and exploratory analytical queries used to test the Gold lay
 
 The analytical layer follows a Star Schema with two dimensions and one fact table.
 
-![Star Schema](./docs/images/star_schema.png)
+![Star Schema](docs/images/star_schema.png)
 
 [View Star Schema PDF](docs/star_schema.pdf)
 
 The source DBML is available at:
 
-[View dimensional_model.dbml](docs/dimensional_model.dbml)
+[View `dimensional_model.dbml`](docs/dimensional_model.dbml)
 
 ### `dim_date`
 
@@ -267,11 +306,17 @@ trimestre
 nome_mes
 ```
 
-`date_key` follows the `YYYYMM` format, for example `202609`.
+`date_key` follows the `YYYYMM` format.
+
+Example:
+
+```text
+202609
+```
 
 ### `dim_vehicle`
 
-Represents a unique vehicle configuration:
+Represents one unique analytical vehicle configuration:
 
 ```text
 vehicle_key
@@ -285,7 +330,9 @@ sigla_combustivel
 nome_combustivel
 ```
 
-`vehicle_key` is a surrogate key. The natural key used to identify a vehicle configuration is:
+`vehicle_key` is a technical surrogate key.
+
+The natural key used to identify a vehicle configuration is:
 
 ```text
 codigo_fipe
@@ -308,10 +355,17 @@ The fact table grain is:
 
 > One FIPE price for one vehicle configuration in one FIPE reference month.
 
-Its logical primary key is therefore:
+Its primary key is:
 
 ```text
 date_key + vehicle_key
+```
+
+The fact table references:
+
+```text
+dim_date.date_key
+dim_vehicle.vehicle_key
 ```
 
 ---
@@ -332,7 +386,9 @@ For example:
 R$ 85.568,00 -> 8556800
 ```
 
-Formatting is handled in the presentation layer, avoiding localized strings in analytical calculations.
+This keeps analytical calculations independent from locale-specific formatting.
+
+Currency formatting is applied only at the presentation layer.
 
 ---
 
@@ -348,6 +404,8 @@ data/gold/
 ```
 
 These files form the analytical interface consumed by Power BI.
+
+The BI layer therefore consumes curated Gold outputs instead of raw, processed, staging or intermediate data.
 
 ---
 
@@ -365,10 +423,10 @@ The orchestrator performs:
 Raw Data
     |
     v
-Python validation
+Python Validation
     |
     v
-Python transformation
+Python Transformation
     |
     v
 Processed Parquet
@@ -386,7 +444,9 @@ Dimensional Marts
 Gold Parquet
 ```
 
-This removes the need to execute notebooks or SQL scripts manually for normal pipeline runs.
+This removes the need to execute notebooks or individual SQL scripts manually during normal pipeline runs.
+
+> **Current scope:** the pipeline processes one monthly FIPE snapshot per execution. The dimensional model and historical key are designed to support future multi-period ingestion.
 
 ---
 
@@ -397,10 +457,23 @@ The project includes automated tests with `pytest`.
 Run them with:
 
 ```bash
-pytest
+pytest -v
 ```
 
-The test suite covers core transformation and validation behavior.
+The test suite covers core transformation and validation behavior, including:
+
+- valid input acceptance;
+- invalid vehicle-type rejection;
+- zero-kilometer/model-year consistency;
+- snapshot grain duplication;
+- reference-period consistency;
+- fuel mapping;
+- positive prices;
+- monetary-field consistency;
+- processed-data validation;
+- manufacturer-name standardization;
+- shape preservation;
+- unexpected business-value changes.
 
 ---
 
@@ -426,25 +499,58 @@ sql/analysis/
 
 Power BI consumes the three Parquet files generated in the Gold layer.
 
+The semantic model follows the same Star Schema implemented in DuckDB:
+
+```text
+dim_date
+    1
+    |
+    *
+fct_fipe_prices
+    *
+    |
+    1
+dim_vehicle
+```
+
 The dashboard contains three analytical pages.
 
 ## 1. FIPE Market Overview
 
-Overview of the complete market, including vehicle count, model count, brand count, median price, maximum price, top brands by median price, portfolio variety and price behavior by model year.
+Market-level overview including configuration count, model count, brand count, median price, maximum price, top brands by median price, portfolio variety and price behavior by model year.
 
 ![FIPE Market Overview](docs/images/powerbi_overview.png)
 
 ## 2. Brands and Models
 
-Comparison of portfolio breadth, pricing and configuration variety across brands and models, with detailed brand-level metrics and model ranking.
+Comparison of portfolio breadth, pricing and configuration variety across brands and models, including detailed brand-level metrics and model rankings.
 
 ![Brands and Models](docs/images/powerbi_brand_model.png)
 
 ## 3. Model Year and Prices
 
-Analysis of vehicle distribution by model year, price positioning and price-band distribution. The dashboard supports interactive filtering by brand, vehicle type, fuel and model-year range.
+Analysis of configuration distribution by model year, price positioning and price-band distribution.
+
+The dashboard supports interactive filtering by:
+
+- brand;
+- vehicle type;
+- fuel type;
+- model-year range.
 
 ![Model Year and Prices](docs/images/powerbi_year_price.png)
+
+### Semantic Note
+
+`vehicle_key` represents one unique analytical vehicle configuration rather than a physical vehicle unit.
+
+The dashboard therefore uses:
+
+```text
+QTD. Configurações
+```
+
+when counting rows at the `vehicle_key` grain.
 
 ### Full Dashboard
 
@@ -471,26 +577,37 @@ Analysis of vehicle distribution by model year, price positioning and price-band
 
 ## Key Engineering Decisions
 
-**Parquet instead of CSV**  
-Preserves data types, provides compression and is better suited to analytical workloads.
+### Parquet instead of CSV
 
-**DuckDB as analytical engine**  
-Provides lightweight SQL analytics directly over Parquet without requiring a database server.
+Parquet preserves data types, provides compression and is better suited to analytical workloads.
 
-**Modular SQL layers**  
-Staging, intermediate and marts separate responsibilities and make transformations easier to maintain.
+### DuckDB as analytical engine
 
-**Surrogate vehicle key**  
-The dimensional model uses a technical key instead of embedding business meaning into a concatenated identifier.
+DuckDB provides lightweight SQL analytics directly over Parquet without requiring a database server.
 
-**Preservation of semantic nulls**  
+### Modular SQL layers
+
+Staging, intermediate and marts separate responsibilities and make transformations easier to understand and maintain.
+
+### Surrogate vehicle key
+
+The dimensional model uses a technical surrogate key instead of embedding business meaning into a concatenated identifier.
+
+### Preservation of semantic nulls
+
 Missing `ano_modelo` values associated with zero-kilometer vehicles are preserved instead of artificially imputed.
 
-**Canonical monetary representation**  
+### Canonical monetary representation
+
 Prices remain stored as integer cents until the presentation layer.
 
-**Gold layer decoupled from Power BI**  
-Power BI consumes curated analytical outputs rather than implementing core data-transformation logic itself.
+### Gold layer decoupled from Power BI
+
+Power BI consumes curated analytical outputs rather than implementing core transformation rules itself.
+
+### Centralized snapshot configuration
+
+The monthly snapshot identifier is defined once in `config.py`, and downstream raw/processed paths are derived from it.
 
 ---
 
@@ -509,32 +626,37 @@ cd 01_automotive_market_data_analysis
 python -m venv .venv
 ```
 
-### 3. Activate the environment on Windows
+### 3. Activate the environment
+
+Windows:
 
 ```bash
 .venv\Scripts\activate
+```
+
+Git Bash:
+
+```bash
+source .venv/Scripts/activate
 ```
 
 ### 4. Install dependencies
 
 ```bash
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 5. Run automated tests
 
 ```bash
-pytest
+pytest -v
 ```
 
 ### 6. Run the complete pipeline
 
 ```bash
 python -m fipex.pipeline
-```
-
-```bash
-pip install -e .
 ```
 
 After successful execution, the analytical datasets are generated under:
@@ -547,7 +669,7 @@ data/gold/
 
 ## Documentation
 
-- [Data Dictionary](docs/data_dictionary.md)
+- [Raw Data Dictionary](docs/data_dictionary.md)
 - [Data Quality Rules](docs/data_quality_rules.md)
 - [Dimensional Model - DBML](docs/dimensional_model.dbml)
 - [Star Schema - PDF](docs/star_schema.pdf)
@@ -558,7 +680,7 @@ data/gold/
 
 ## Project Outcome
 
-This project delivers a reproducible end-to-end analytical data pipeline, starting with raw automotive market data and ending with a dimensional model consumed by Power BI.
+This project delivers a reproducible end-to-end analytical data pipeline, starting with raw Brazilian automotive market data and ending with a dimensional model consumed by Power BI.
 
 The project demonstrates practical application of:
 
@@ -578,5 +700,7 @@ Automated Testing
 Pipeline Orchestration
 Power BI
 Git
-Documentation
+Technical Documentation
 ```
+
+The final result is not only a dashboard, but a complete analytical workflow that documents and automates the path from raw source data to a curated BI-ready data product.

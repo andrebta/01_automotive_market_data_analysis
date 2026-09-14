@@ -1,12 +1,10 @@
 .venv/
 .env
 __pycache__/
+.pytest_cache/
 *.pyc
 .ipynb_checkpoints/
 
 data/raw/*
 data/processed/*
 data/fipex.duckdb
-
-protocolo_vscode_projetos.pdf
-
