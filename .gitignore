@@ -7,3 +7,6 @@ __pycache__/
 data/raw/*
 data/processed/*
 data/fipex.duckdb
+
+protocolo_vscode_projetos.pdf
+
