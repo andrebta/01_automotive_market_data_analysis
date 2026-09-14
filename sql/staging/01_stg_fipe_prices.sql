@@ -1,5 +1,4 @@
 CREATE OR REPLACE VIEW stg_fipe_prices AS
-
 SELECT
     ano_referencia,
     mes_referencia,
@@ -13,4 +12,4 @@ SELECT
     sigla_combustivel,
     valor_centavos,
     valor_formatado
-FROM read_parquet('data/processed/fipex_prices_2026_09.parquet');
+FROM read_parquet('{{PROCESSED_FILE}}');

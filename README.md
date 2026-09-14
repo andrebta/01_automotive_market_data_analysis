@@ -116,7 +116,13 @@ Gold    -> DuckDB marts + data/gold
 
 ## Data Source
 
-The dataset represents FIPE automotive market prices and includes fields such as:
+The dataset used in this project comes from the FIPE-derived public dataset maintained by FipeX Labs.
+
+Source repository:
+
+https://github.com/fipex-labs/dataset
+
+The dataset contains Brazilian automotive market reference prices and includes information such as:
 
 - reference year and month;
 - vehicle type;
@@ -128,7 +134,9 @@ The dataset represents FIPE automotive market prices and includes fields such as
 - fuel type;
 - price.
 
-Parquet is used as the main file format to preserve data types and provide efficient analytical storage.
+The dataset is distributed under the CC0 1.0 Universal license, allowing unrestricted use, modification and redistribution.
+
+The current project stores the source data in Parquet format to preserve data types and provide efficient analytical storage.
 
 ---
 
@@ -491,7 +499,7 @@ Power BI consumes curated analytical outputs rather than implementing core data-
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/andrebta/01_automotive_market_data_analysis.git
 cd 01_automotive_market_data_analysis
 ```
 
@@ -525,6 +533,10 @@ pytest
 python -m fipex.pipeline
 ```
 
+```bash
+pip install -e .
+```
+
 After successful execution, the analytical datasets are generated under:
 
 ```text
@@ -540,6 +552,7 @@ data/gold/
 - [Dimensional Model - DBML](docs/dimensional_model.dbml)
 - [Star Schema - PDF](docs/star_schema.pdf)
 - [Power BI Dashboard - PDF](docs/powerbi_dashboard.pdf)
+- [Source Dataset - FipeX Labs](https://github.com/fipex-labs/dataset)
 
 ---
 

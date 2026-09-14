@@ -6,10 +6,16 @@ from fipex.config import (
     GOLD_DATA_DIR,
     DATABASE_FILE,
     SQL_DIR,
+    DIM_DATE_FILE,
+    DIM_VEHICLE_FILE,
+    FACT_PRICES_FILE,
 )
 from fipex.io import load_parquet, save_parquet
 from fipex.transformations import transform_fipe_data
-from fipex.validation import validate_fipe_data, validate_processed_data
+from fipex.validation import (
+    validate_fipe_data,
+    validate_processed_data,
+)
 
 
 SQL_FILES = [
@@ -21,6 +27,24 @@ SQL_FILES = [
     SQL_DIR / "marts" / "03_fct_fipe_prices.sql",
     SQL_DIR / "export" / "01_export_gold.sql",
 ]
+
+
+def sql_path(path) -> str:
+    return path.resolve().as_posix().replace("'", "''")
+
+
+def render_sql(sql: str) -> str:
+    replacements = {
+        "{{PROCESSED_FILE}}": sql_path(PROCESSED_FILE),
+        "{{DIM_DATE_FILE}}": sql_path(DIM_DATE_FILE),
+        "{{DIM_VEHICLE_FILE}}": sql_path(DIM_VEHICLE_FILE),
+        "{{FACT_PRICES_FILE}}": sql_path(FACT_PRICES_FILE),
+    }
+
+    for placeholder, value in replacements.items():
+        sql = sql.replace(placeholder, value)
+
+    return sql
 
 
 def run_python_pipeline() -> None:
@@ -49,9 +73,19 @@ def execute_sql_file(
     file_path,
 ) -> None:
     sql = file_path.read_text(encoding="utf-8")
+    sql = render_sql(sql)
+
     connection.execute(sql)
 
     print(f"Executed: {file_path.relative_to(SQL_DIR)}")
+
+
+def reset_marts(
+    connection: duckdb.DuckDBPyConnection,
+) -> None:
+    connection.execute("DROP TABLE IF EXISTS fct_fipe_prices;")
+    connection.execute("DROP TABLE IF EXISTS dim_vehicle;")
+    connection.execute("DROP TABLE IF EXISTS dim_date;")
 
 
 def run_sql_pipeline() -> None:
@@ -62,9 +96,7 @@ def run_sql_pipeline() -> None:
     connection = duckdb.connect(str(DATABASE_FILE))
 
     try:
-        connection.execute("DROP TABLE IF EXISTS fct_fipe_prices;")
-        connection.execute("DROP TABLE IF EXISTS dim_vehicle;")
-        connection.execute("DROP TABLE IF EXISTS dim_date;")
+        reset_marts(connection)
 
         for sql_file in SQL_FILES:
             execute_sql_file(connection, sql_file)

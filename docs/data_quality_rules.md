@@ -1,30 +1,40 @@
 # Data Quality Rules
 
-This document defines the data quality constraints identified during exploratory profiling of the FIPE dataset.
+This document defines the main data quality rules identified during profiling of the FIPE dataset and implemented in the project validation layer.
 
-The rules describe expected structural, semantic, relational, and formatting properties that downstream ingestion and transformation pipelines should validate.
+Executable validations are implemented in:
+
+```text
+src/fipex/validation.py
+```
+
+Transformation-related standardization rules are implemented in:
+
+```text
+src/fipex/transformations.py
+```
 
 ---
 
 ## Rule Summary
 
-| Rule ID | Category | Column(s) | Rule | Severity |
-|---|---|---|---|---|
-| DQ001 | Completeness | `codigo_fipe` | Must not be null | Critical |
-| DQ002 | Completeness | All columns except `ano_modelo` | Must not be null | Critical |
-| DQ003 | Conditional Nullability | `ano_modelo`, `zero_km` | `ano_modelo IS NULL` if `zero_km = True` | Critical |
-| DQ004 | Uniqueness | Snapshot key | Must be unique within a snapshot | Critical |
-| DQ005 | Uniqueness | Historical key | Must be unique across historical snapshots | Critical |
-| DQ006 | Domain | `tipo_veiculo` | Must belong to the expected vehicle-type domain | High |
-| DQ007 | Referential Mapping | `nome_combustivel`, `sigla_combustivel` | Must maintain a bidirectional 1:1 relationship | High |
-| DQ008 | Functional Dependency | `codigo_fipe`, `nome_marca`, `nome_modelo` | Each FIPE code must identify exactly one brand-model combination | Critical |
-| DQ009 | Functional Dependency | `nome_marca`, `nome_modelo`, `codigo_fipe` | Each brand-model combination must identify exactly one FIPE code | High |
-| DQ010 | Monetary Validity | `valor_centavos` | Must be greater than zero | Critical |
-| DQ011 | Monetary Consistency | `valor_centavos`, `valor_formatado` | Both fields must represent exactly the same monetary value | Critical |
-| DQ012 | Formatting | `valor_formatado` | Must follow the expected Brazilian currency format | Medium |
-| DQ013 | Snapshot Consistency | `mes_referencia`, `ano_referencia` | Must each contain a single value within one snapshot | High |
-| DQ014 | Domain | `mes_referencia` | Must be between 1 and 12 | Critical |
-| DQ015 | Standardization | `nome_marca` | Case-insensitive duplicate brand variants must be detected | Medium |
+| Rule ID | Category | Column(s) | Rule | Severity | Validation Layer |
+|---|---|---|---|---|---|
+| DQ001 | Completeness | `codigo_fipe` | Must not be null | Critical | Raw / Processed |
+| DQ002 | Completeness | All columns except `ano_modelo` | Must not be null | Critical | Raw / Processed |
+| DQ003 | Conditional Nullability | `ano_modelo`, `zero_km` | `ano_modelo IS NULL` if and only if `zero_km = True` | Critical | Raw / Processed |
+| DQ004 | Uniqueness | Snapshot key | Must be unique within a snapshot | Critical | Raw / Processed |
+| DQ005 | Uniqueness | Historical key | Must be unique across historical snapshots | Critical | Historical datasets |
+| DQ006 | Domain | `tipo_veiculo` | Must belong to the expected vehicle-type domain | High | Raw / Processed |
+| DQ007 | Referential Mapping | `nome_combustivel`, `sigla_combustivel` | Present values must follow the expected 1:1 mapping | High | Raw / Processed |
+| DQ008 | Functional Dependency | `codigo_fipe`, `nome_marca`, `nome_modelo` | Each FIPE code must identify exactly one brand-model combination | Critical | Raw / Processed |
+| DQ009 | Functional Dependency | `nome_marca`, `nome_modelo`, `codigo_fipe` | Each brand-model combination must identify exactly one FIPE code | High | Raw / Processed |
+| DQ010 | Monetary Validity | `valor_centavos` | Must be greater than zero | Critical | Raw / Processed |
+| DQ011 | Monetary Consistency | `valor_centavos`, `valor_formatado` | Both fields must represent exactly the same monetary value | Critical | Raw / Processed |
+| DQ012 | Formatting | `valor_formatado` | Must follow the expected Brazilian currency format | Medium | Raw / Processed |
+| DQ013 | Snapshot Consistency | `mes_referencia`, `ano_referencia` | A single snapshot must contain exactly one reference period | High | Snapshot |
+| DQ014 | Domain | `mes_referencia` | Must be between 1 and 12 | Critical | Raw / Processed |
+| DQ015 | Standardization | `nome_marca` | Non-standard brand variants must not remain after transformation | Medium | Processed |
 
 ---
 
@@ -37,6 +47,14 @@ The rules describe expected structural, semantic, relational, and formatting pro
 ```text
 codigo_fipe IS NOT NULL
 ```
+
+### Rationale
+
+The FIPE code is a core business identifier and participates in the natural key of the dataset.
+
+### Severity
+
+**Critical**
 
 ---
 
@@ -68,21 +86,31 @@ Therefore, null values in any other column should be treated as a data quality v
 
 ### Rule
 
-`ano_modelo` may be null only when `zero_km = True`.
+`ano_modelo` must be null if and only if `zero_km = True`.
 
 ```text
 ano_modelo IS NULL IF AND ONLY IF zero_km = True
 ```
 
+Therefore:
+
+```text
+zero_km = True
+→ ano_modelo IS NULL
+```
+
+and:
+
+```text
+zero_km = False
+→ ano_modelo IS NOT NULL
+```
+
 ### Rationale
 
-The profiling analysis identified a deterministic relationship between `ano_modelo` and `zero_km`:
+The profiling analysis identified a deterministic relationship between `ano_modelo` and `zero_km`.
 
-- all records where `zero_km = True` have `ano_modelo = NULL`;
-- all records where `ano_modelo = NULL` have `zero_km = True`;
-- no non-zero-km vehicle has a null `ano_modelo`.
-
-Therefore, the null state of `ano_modelo` carries business meaning and must be preserved explicitly.
+The null state of `ano_modelo` carries business meaning and must be preserved explicitly.
 
 `ano_modelo` must not be imputed with values such as `2027`, because `2027` is already a legitimate model year in the observed domain and would conflate two distinct business states.
 
@@ -109,20 +137,9 @@ codigo_fipe
 
 Duplicate analysis showed that apparent duplicates were explained by vehicle condition and fuel type.
 
-The validated snapshot grain is therefore:
+Each row represents one FIPE reference price for one unique vehicle configuration within a single reference period.
 
-```text
-codigo_fipe + ano_modelo + zero_km + sigla_combustivel
-```
-
-Each row represents one FIPE reference price for one unique combination of:
-
-- FIPE code;
-- model year;
-- vehicle condition;
-- fuel type.
-
-No duplicate rows should exist for this grain within the same snapshot.
+Duplicate rows for this grain are invalid.
 
 ### Severity
 
@@ -134,9 +151,7 @@ No duplicate rows should exist for this grain within the same snapshot.
 
 ### Rule
 
-When multiple FIPE snapshots are combined, the historical key must uniquely identify each record.
-
-The expected historical key is:
+When multiple FIPE snapshots are combined, the historical key must uniquely identify each record:
 
 ```text
 ano_referencia
@@ -149,9 +164,7 @@ ano_referencia
 
 ### Rationale
 
-`mes_referencia` and `ano_referencia` are constant within the current dataset because the file represents a single monthly FIPE snapshot.
-
-Although they do not discriminate rows inside the current snapshot, they define the temporal context of each observed price.
+`mes_referencia` and `ano_referencia` define the temporal context of each observed price.
 
 When multiple snapshots are appended into a historical dataset, both columns must become part of the key to prevent collisions between identical vehicle configurations observed in different reference periods.
 
@@ -175,15 +188,9 @@ moto
 
 ### Rationale
 
-The observed domain contains exactly three categories:
+The observed domain contains exactly three categories and no malformed values were identified during profiling.
 
-- `carro`;
-- `caminhão`;
-- `moto`.
-
-The domain is small, well-defined, and no formatting inconsistencies were observed during profiling.
-
-Any additional value should therefore be treated as an unexpected domain value requiring investigation.
+Any additional value should be treated as unexpected and investigated.
 
 ### Severity
 
@@ -195,35 +202,23 @@ Any additional value should therefore be treated as an unexpected domain value r
 
 ### Rule
 
-`nome_combustivel` and `sigla_combustivel` must maintain a bidirectional one-to-one relationship.
+Whenever a fuel value is present, `nome_combustivel` and `sigla_combustivel` must match the expected mapping:
 
-```text
-nome_combustivel -> sigla_combustivel
-sigla_combustivel -> nome_combustivel
-```
-
-The observed mappings are:
-
-| nome_combustivel | sigla_combustivel |
+| `nome_combustivel` | `sigla_combustivel` |
 |---|---|
-| Gasolina | g |
-| Diesel | d |
-| Flex | f |
-| Híbrido | h |
-| Elétrico | l |
-| Álcool | e |
-| Gás Natural | n |
+| `Gasolina` | `g` |
+| `Diesel` | `d` |
+| `Flex` | `f` |
+| `Híbrido` | `h` |
+| `Elétrico` | `l` |
+| `Álcool` | `e` |
+| `Gás Natural` | `n` |
+
+The validation does not require all seven fuel types to appear in every dataset subset.
 
 ### Rationale
 
-Exploratory profiling confirmed that:
-
-- each fuel name maps to exactly one fuel code;
-- each fuel code maps to exactly one fuel name;
-- the frequency distributions match across both columns;
-- no unmatched fuel categories were observed.
-
-This relationship represents a referential consistency constraint.
+Exploratory profiling confirmed that each observed fuel description maps to exactly one fuel code and each fuel code maps to exactly one fuel description.
 
 ### Severity
 
@@ -251,7 +246,7 @@ codigo_fipe -> nome_marca, nome_modelo
 
 Profiling confirmed that each FIPE code maps to exactly one brand-model combination.
 
-Therefore, a single `codigo_fipe` associated with multiple brand-model combinations would indicate a structural inconsistency in the dataset.
+A single `codigo_fipe` associated with multiple brand-model combinations would indicate a structural inconsistency.
 
 ### Severity
 
@@ -281,17 +276,7 @@ nome_marca, nome_modelo -> codigo_fipe
 
 `nome_modelo` is not globally unique across manufacturers.
 
-Five model names were identified as being shared across different manufacturers:
-
-- `16-220 T 3-Eixos 2p (diesel)`;
-- `16-220 Turbo 2p (diesel)`;
-- `CR 125`;
-- `CR 250`;
-- `FENIX GOLD 240`.
-
-The ambiguity disappears when `nome_marca` is included.
-
-Therefore, the brand-model combination behaves as an alternate business identifier for `codigo_fipe`.
+The ambiguity disappears when `nome_marca` is included, so the brand-model combination behaves as an alternate business identifier for `codigo_fipe`.
 
 ### Severity
 
@@ -313,19 +298,7 @@ valor_centavos > 0
 
 The current snapshot contains only positive vehicle prices.
 
-No zero or negative values were observed.
-
-The observed monetary range was:
-
-```text
-R$ 872,00
-to
-R$ 9.749.142,00
-```
-
-The lower and upper extremes were manually inspected and were considered semantically plausible for their associated vehicle records.
-
-Therefore, statistical extremity alone should not invalidate a price, but zero or negative values should be rejected.
+Statistical extremity alone should not invalidate a price, but zero or negative values should be rejected.
 
 ### Severity
 
@@ -339,27 +312,18 @@ Therefore, statistical extremity alone should not invalidate a price, but zero o
 
 `valor_centavos` and `valor_formatado` must represent exactly the same monetary value.
 
-The relationship must hold in both directions:
-
-```text
-valor_centavos -> valor_formatado
-valor_formatado -> valor_centavos
-```
-
-Additionally, parsing `valor_formatado` into integer cents must produce the exact value stored in `valor_centavos`.
+Parsing `valor_formatado` into integer cents must produce the exact value stored in `valor_centavos`.
 
 ### Rationale
 
 Profiling confirmed a bidirectional one-to-one relationship between both monetary fields.
-
-No mismatches were found after converting `valor_formatado` back into integer cents and comparing the result with `valor_centavos`.
 
 Therefore:
 
 - `valor_centavos` is the canonical numerical field;
 - `valor_formatado` is a derived presentation field.
 
-Any discrepancy between the two should be considered a data quality violation.
+Any discrepancy between the two is a data quality violation.
 
 ### Severity
 
@@ -371,9 +335,7 @@ Any discrepancy between the two should be considered a data quality violation.
 
 ### Rule
 
-`valor_formatado` must follow the expected Brazilian currency representation.
-
-Expected format:
+`valor_formatado` must follow the expected Brazilian currency representation:
 
 ```text
 R$ X.XXX,XX
@@ -389,8 +351,6 @@ R$ 1.250.000,00
 
 ### Rationale
 
-All observed values in `valor_formatado` conform to the Brazilian currency formatting convention used in the dataset.
-
 The field is presentation-oriented and must remain parseable into the canonical numeric representation stored in `valor_centavos`.
 
 ### Severity
@@ -403,20 +363,27 @@ The field is presentation-oriented and must remain parseable into the canonical 
 
 ### Rule
 
-`mes_referencia` and `ano_referencia` must each contain exactly one unique value within a single snapshot.
+A dataset representing one monthly FIPE snapshot must contain exactly one unique combination of:
 
 ```text
-COUNT_DISTINCT(mes_referencia) = 1
-COUNT_DISTINCT(ano_referencia) = 1
+ano_referencia
++ mes_referencia
+```
+
+For the current snapshot:
+
+```text
+ano_referencia = 2026
+mes_referencia = 9
 ```
 
 ### Rationale
 
 Both columns are snapshot-level metadata.
 
-In the current dataset, each contains a single unique value across all records, which is expected because the file represents one FIPE monthly snapshot.
+Multiple reference periods inside a single input snapshot would indicate that different monthly snapshots were mixed unexpectedly.
 
-Multiple values inside a single input snapshot would indicate that different reference periods were mixed unexpectedly.
+When multiple snapshots are intentionally combined into a historical dataset, this rule must be applied at the individual snapshot level rather than across the complete historical dataset.
 
 ### Severity
 
@@ -436,9 +403,7 @@ Multiple values inside a single input snapshot would indicate that different ref
 
 ### Rationale
 
-`mes_referencia` represents the calendar month associated with the FIPE reference period.
-
-Although the current snapshot contains only one month value, the field must remain constrained to the valid calendar-month domain in all future snapshots.
+`mes_referencia` represents the calendar month associated with the FIPE reference period and must remain inside the valid calendar-month domain.
 
 ### Severity
 
@@ -450,35 +415,99 @@ Although the current snapshot contains only one month value, the field must rema
 
 ### Rule
 
-Case-insensitive duplicate variants of `nome_marca` must be detected and normalized before downstream analytical use.
+Case-insensitive duplicate variants of `nome_marca` must be standardized during transformation.
 
 The following variants were identified during profiling:
 
-| Normalized brand | Observed variants |
+| Canonical brand | Raw variants |
 |---|---|
-| `agrale` | `AGRALE`, `Agrale` |
-| `fiat` | `FIAT`, `Fiat` |
-| `ford` | `FORD`, `Ford` |
-| `honda` | `HONDA`, `Honda` |
-| `hyundai` | `HYUNDAI`, `Hyundai` |
-| `mercedes-benz` | `MERCEDES-BENZ`, `Mercedes-Benz` |
-| `peugeot` | `PEUGEOT`, `Peugeot` |
-| `suzuki` | `SUZUKI`, `Suzuki` |
-| `volvo` | `VOLVO`, `Volvo` |
+| `Agrale` | `AGRALE`, `Agrale` |
+| `Fiat` | `FIAT`, `Fiat` |
+| `Ford` | `FORD`, `Ford` |
+| `Honda` | `HONDA`, `Honda` |
+| `Hyundai` | `HYUNDAI`, `Hyundai` |
+| `Mercedes-Benz` | `MERCEDES-BENZ`, `Mercedes-Benz` |
+| `Peugeot` | `PEUGEOT`, `Peugeot` |
+| `Suzuki` | `SUZUKI`, `Suzuki` |
+| `Volvo` | `VOLVO`, `Volvo` |
+
+After transformation, non-standard variants must no longer be present.
 
 ### Rationale
 
-Case-insensitive grouping of `nome_marca` identified multiple textual representations of the same manufacturer.
+These differences do not represent distinct business entities and artificially increase the observed cardinality of `nome_marca`.
 
-These differences do not represent distinct business entities and artificially increase the observed cardinality of the column.
+Standardization is implemented in:
 
-Unlike `nome_modelo`, where no capitalization-only duplicates were identified, `nome_marca` requires explicit standardization.
+```text
+src/fipex/transformations.py
+```
 
-A canonical capitalization strategy should therefore be applied during transformation.
+Validation is performed on the processed dataset.
 
 ### Severity
 
 **Medium**
+
+---
+
+## Additional Domain Validation — Model Year Plausibility
+
+When `ano_modelo` is not null, it must satisfy:
+
+```text
+ano_modelo >= 1900
+```
+
+and:
+
+```text
+ano_modelo <= ano_referencia + 1
+```
+
+This allows legitimate future model-year values such as `2027` in the 2026 reference snapshot.
+
+---
+
+## Processed Data Integrity Checks
+
+In addition to the business data quality rules, the processed dataset is validated for transformation integrity.
+
+### Expected Data Types
+
+The processed dataset must contain compatible data types for:
+
+- reference year and month;
+- nullable model year;
+- boolean zero-km indicator;
+- integer monetary value;
+- textual categorical fields.
+
+Text columns may use either Pandas `object` or string-compatible dtypes depending on the Pandas version.
+
+### Shape Preservation
+
+The transformation layer must not unexpectedly add or remove rows or columns.
+
+Expected condition:
+
+```text
+raw.shape = processed.shape
+```
+
+### Unchanged Business Values
+
+The following fields must not be altered by standardization:
+
+```text
+mes_referencia
+ano_referencia
+ano_modelo
+zero_km
+valor_centavos
+```
+
+Only fields explicitly targeted by transformations, such as manufacturer naming and string cleanup, may change.
 
 ---
 
@@ -488,15 +517,63 @@ The rules above should be applied according to the following principles:
 
 - violations of **Critical** rules should block ingestion or publication of the affected dataset;
 - violations of **High** rules should fail validation unless explicitly reviewed and accepted;
-- violations of **Medium** rules may allow pipeline execution, but should generate a warning and be corrected during transformation;
+- violations of **Medium** rules should be corrected during transformation and may be surfaced as warnings during profiling;
 - statistical outliers must not automatically be classified as invalid values without supporting semantic evidence;
 - deterministic relationships identified during profiling should be treated as enforceable data contracts for downstream processing.
 
 ---
 
-## Rule Coverage
+## Validation Flow
 
-The current rule set covers the following data quality dimensions:
+```text
+Raw Dataset
+    |
+    v
+Schema Validation
+    |
+    v
+Completeness Validation
+    |
+    v
+Snapshot Grain Validation
+    |
+    v
+Historical Grain Validation
+    |
+    v
+Domain Validation
+    |
+    v
+Reference Period Validation
+    |
+    v
+Functional Dependency Validation
+    |
+    v
+Monetary Validation
+    |
+    v
+Transformation
+    |
+    v
+Processed Dataset Validation
+    |
+    v
+Data Type Validation
+    |
+    v
+Shape Preservation
+    |
+    v
+Unchanged Value Validation
+    |
+    v
+Brand Standardization Validation
+```
+
+---
+
+## Rule Coverage
 
 | Dimension | Covered Rules |
 |---|---|
@@ -510,4 +587,4 @@ The current rule set covers the following data quality dimensions:
 | Snapshot Consistency | DQ013 |
 | Standardization | DQ015 |
 
-These rules constitute the initial data quality contract derived from the exploratory profiling of the FIPE dataset.
+These rules constitute the initial data quality contract derived from exploratory profiling and enforced by the current FIPE processing pipeline.

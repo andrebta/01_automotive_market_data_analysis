@@ -1,11 +1,11 @@
 COPY dim_date
-TO 'data/gold/dim_date.parquet'
+TO '{{DIM_DATE_FILE}}'
 (FORMAT PARQUET);
 
 COPY dim_vehicle
-TO 'data/gold/dim_vehicle.parquet'
+TO '{{DIM_VEHICLE_FILE}}'
 (FORMAT PARQUET);
 
 COPY fct_fipe_prices
-TO 'data/gold/fct_fipe_prices.parquet'
+TO '{{FACT_PRICES_FILE}}'
 (FORMAT PARQUET);
